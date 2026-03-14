@@ -1,0 +1,188 @@
+/* ============================================================================
+   Satellite Tag Editor
+   ============================================================================ */
+
+.tag-editor {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    padding: var(--space-md);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+}
+
+.tag-editor__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.tag-editor__label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.tag-editor__enterprise-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: 2px var(--space-sm);
+    background: var(--accent-muted);
+    color: var(--accent);
+    border-radius: var(--radius-full);
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.tag-editor__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    min-height: 32px;
+}
+
+/* Tag Chip */
+.tag-editor-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: 4px var(--space-sm);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-full);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    transition: all var(--transition-fast);
+}
+
+.tag-editor-chip:hover {
+    background: var(--bg-hover);
+    border-color: var(--text-muted);
+}
+
+/* Auto tag (read-only, muted) */
+.tag-editor-chip--auto {
+    background: var(--bg-surface);
+    border-color: var(--border);
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.tag-editor-chip--auto:hover {
+    background: var(--bg-surface);
+    border-color: var(--border);
+}
+
+/* Remove button on chip */
+.tag-editor-chip__remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    margin-left: 2px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-full);
+    font-size: 14px;
+    line-height: 1;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.tag-editor-chip__remove:hover {
+    background: var(--danger-muted);
+    color: var(--danger);
+}
+
+.tag-editor-chip__remove:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Input row */
+.tag-editor__input-row {
+    display: flex;
+    gap: var(--space-sm);
+}
+
+.tag-editor-input {
+    flex: 1;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    color: var(--text);
+    transition: all var(--transition-fast);
+}
+
+.tag-editor-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-muted);
+}
+
+.tag-editor-input::placeholder {
+    color: var(--text-muted);
+}
+
+.tag-editor-input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.tag-editor__add-btn {
+    padding: var(--space-sm) var(--space-md);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+}
+
+.tag-editor__add-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    border-color: var(--text-muted);
+    color: var(--text);
+}
+
+.tag-editor__add-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Error message */
+.tag-editor__error {
+    font-size: 12px;
+    color: var(--danger);
+    padding: var(--space-xs) 0;
+}
+
+/* Footer */
+.tag-editor__footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--border-subtle);
+}
+
+.tag-editor__count {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* Save button - using existing button classes */
+.tag-editor__save-btn {
+    min-height: 32px;
+}

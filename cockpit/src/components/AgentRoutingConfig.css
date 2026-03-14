@@ -1,0 +1,246 @@
+/**
+ * AgentRoutingConfig — Agent routing configuration styles
+ *
+ * Follows ScheduleConfig/TriggerConfig patterns for agent builder sections.
+ */
+
+.routing-config {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  padding: var(--space-lg);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.routing-config__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.routing-config__title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+/* Toggle Row */
+.routing-config-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md) var(--space-lg);
+  background: var(--bg-elevated);
+  border-radius: var(--radius-md);
+}
+
+.routing-config-toggle__label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.routing-config-toggle__label-text {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.routing-config-toggle__label-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* Toggle Switch */
+.routing-config-toggle__switch {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.routing-config-toggle__switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.routing-config-toggle__slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  transition: var(--transition-base);
+}
+
+.routing-config-toggle__slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 2px;
+  bottom: 2px;
+  background-color: var(--text-muted);
+  border-radius: 50%;
+  transition: var(--transition-base);
+}
+
+.routing-config-toggle__switch input:checked + .routing-config-toggle__slider {
+  background-color: var(--accent-muted);
+  border-color: var(--accent);
+}
+
+.routing-config-toggle__switch input:checked + .routing-config-toggle__slider:before {
+  transform: translateX(20px);
+  background-color: var(--accent);
+}
+
+.routing-config-toggle__switch input:disabled + .routing-config-toggle__slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.routing-config-toggle__switch input:disabled + .routing-config-toggle__slider:before {
+  background-color: var(--text-muted);
+}
+
+/* Tooltip */
+.routing-config-toggle__tooltip {
+  position: relative;
+  display: inline-block;
+}
+
+.routing-config-toggle__tooltip-text {
+  visibility: hidden;
+  width: 160px;
+  background-color: var(--bg-elevated);
+  color: var(--text);
+  text-align: center;
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm) var(--space-md);
+  position: absolute;
+  z-index: 1;
+  bottom: 125%;
+  right: 0;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+  font-size: 0.75rem;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+}
+
+.routing-config-toggle__tooltip:hover .routing-config-toggle__tooltip-text {
+  visibility: visible;
+  opacity: 1;
+}
+
+/* Tags Container */
+.routing-config-tags {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Tag Input Section */
+.routing-config-tags__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.routing-config-tags__label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.routing-config-tags__label-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+/* Chip Input */
+.routing-config-tags__input-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  min-height: 42px;
+  align-items: center;
+  transition: var(--transition-fast);
+}
+
+.routing-config-tags__input-wrapper:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-muted);
+}
+
+.routing-config-tags__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--accent-muted);
+  color: var(--accent);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.routing-config-tags__chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  border-radius: 50%;
+  transition: var(--transition-fast);
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.routing-config-tags__chip-remove:hover {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.routing-config-tags__input {
+  flex: 1;
+  min-width: 100px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 0.875rem;
+  padding: var(--space-xs);
+  outline: none;
+}
+
+.routing-config-tags__input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Empty state */
+.routing-config-tags__empty {
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  font-style: italic;
+}

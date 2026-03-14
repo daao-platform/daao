@@ -1,0 +1,8 @@
+linters-settings:
+  govet:
+    disable:
+      - unsafeptr  # ConPTY API requires passing HPCON handle as uintptr → unsafe.Pointer
+
+linters:
+  enable:
+    - govet

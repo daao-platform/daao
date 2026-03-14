@@ -1,0 +1,258 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    - cron: '0 8 * * *'  # Nightly at 8am UTC
+
+env:
+  GO_VERSION: '1.26'
+  NODE_VERSION: '20'
+
+jobs:
+  # ──────────────────────────────────────────────────────────────
+  # 🔴 MUST-PASS GATE — fast build + vet check (~30s)
+  # ──────────────────────────────────────────────────────────────
+  build:
+    name: Go Build & Vet
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+  # ──────────────────────────────────────────────────────────────
+  # 🟡 INFORMATIONAL — tests run but don't block merges
+  # ──────────────────────────────────────────────────────────────
+  test:
+    name: Go Tests
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs: build
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: daao
+          POSTGRES_PASSWORD: daao_password
+          POSTGRES_DB: daao
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --health-start-period 10s
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Wait for PostgreSQL
+        run: sleep 10
+
+      - name: Run Go tests with race detector
+        run: go test -race -timeout 120s ./...
+        env:
+          DATABASE_URL: postgres://daao:daao_password@localhost:5432/daao?sslmode=disable
+
+  cockpit:
+    name: Cockpit Build & Test
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Cockpit dependencies
+        working-directory: ./cockpit
+        run: npm ci
+
+      - name: Build Cockpit
+        working-directory: ./cockpit
+        run: npm run build
+
+      - name: Run Cockpit tests
+        working-directory: ./cockpit
+        run: npm test
+
+  # ──────────────────────────────────────────────────────────────
+  # 🔵 NIGHTLY ONLY — heavy integration & Docker tests
+  # ──────────────────────────────────────────────────────────────
+  docker:
+    name: Docker Compose Build and Health Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create CI env file
+        run: |
+          cat > .env <<EOF
+          POSTGRES_PASSWORD=ci_password
+          JWT_SECRET=ci-test-secret
+          DATABASE_URL=postgres://daao:ci_password@postgres:5432/daao?sslmode=disable
+          EOF
+
+      - name: Build Docker images
+        run: docker compose build
+
+      - name: Start services and check health
+        run: |
+          docker compose up -d
+
+          echo "Waiting for PostgreSQL..."
+          for i in {1..30}; do
+            if docker compose exec -T postgres pg_isready -U daao -d daao > /dev/null 2>&1; then
+              echo "PostgreSQL is ready"
+              break
+            fi
+            sleep 2
+          done
+
+          echo "Waiting for Nexus..."
+          for i in {1..30}; do
+            if docker compose exec -T nexus nc -z localhost 8443 > /dev/null 2>&1; then
+              echo "Nexus is ready"
+              break
+            fi
+            sleep 2
+          done
+
+          echo "Waiting for Cockpit..."
+          for i in {1..15}; do
+            if docker compose exec -T cockpit wget --spider -q http://127.0.0.1/health > /dev/null 2>&1; then
+              echo "Cockpit is ready"
+              break
+            fi
+            sleep 2
+          done
+
+          echo "All services started and healthy"
+          docker compose ps
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
+
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    needs: build
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: daao
+          POSTGRES_PASSWORD: daao_password
+          POSTGRES_DB: daao
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --health-start-period 10s
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Build mock satellite
+        run: go build -o bin/daao-mock ./cmd/daao-mock
+
+      - name: Run integration tests
+        run: go test -race -timeout 120s ./tests/integration/...
+        env:
+          DATABASE_URL: postgres://daao:daao_password@localhost:5432/daao?sslmode=disable
+
+  smoke-test:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    needs: [build, docker]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create CI env file
+        run: |
+          cat > .env <<EOF
+          POSTGRES_PASSWORD=ci_password
+          JWT_SECRET=ci-test-secret
+          DATABASE_URL=postgres://daao:ci_password@postgres:5432/daao?sslmode=disable
+          EOF
+
+      - name: Build mock satellite
+        run: go build -o bin/daao-mock ./cmd/daao-mock
+
+      - name: Start Docker Compose
+        run: docker compose up -d
+
+      - name: Wait for services
+        run: |
+          echo "Waiting for services to become healthy..."
+          for i in {1..30}; do
+            if docker compose exec -T postgres pg_isready -U daao -d daao > /dev/null 2>&1; then
+              echo "PostgreSQL ready"
+              break
+            fi
+            sleep 2
+          done
+          for i in {1..30}; do
+            if docker compose exec -T nexus nc -z localhost 8443 > /dev/null 2>&1; then
+              echo "Nexus ready"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Run smoke test
+        run: |
+          chmod +x scripts/smoke-test.sh
+          ./scripts/smoke-test.sh
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v

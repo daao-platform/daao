@@ -1,0 +1,79 @@
+# ── Stage 1: Cross-compile satellite binaries ────────────────────────────────
+FROM golang:1.26-alpine AS go-builder
+
+RUN apk add --no-cache git
+
+WORKDIR /build
+
+# Copy go mod files first for better caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy all Go source code
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+COPY pkg/ ./pkg/
+COPY proto/ ./proto/
+
+# Cross-compile satellite binaries with version injection
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -ldflags="-s -w -X main.Version=${VERSION}" -o /releases/daao-linux-amd64     ./cmd/daao && \
+    CGO_ENABLED=0 GOOS=linux   GOARCH=arm64 go build -ldflags="-s -w -X main.Version=${VERSION}" -o /releases/daao-linux-arm64     ./cmd/daao && \
+    CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w -X main.Version=${VERSION}" -o /releases/daao-darwin-amd64    ./cmd/daao && \
+    CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64 go build -ldflags="-s -w -X main.Version=${VERSION}" -o /releases/daao-darwin-arm64    ./cmd/daao && \
+    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -X main.Version=${VERSION}" -o /releases/daao-windows-amd64.exe ./cmd/daao && \
+    CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -ldflags="-s -w -X main.Version=${VERSION}" -o /releases/daao-windows-arm64.exe ./cmd/daao && \
+    echo "${VERSION}" > /releases/version.txt
+
+# ── Stage 2: Build Cockpit frontend ──────────────────────────────────────────
+FROM node:22-alpine AS builder
+
+# Accept OIDC build args
+ARG VITE_OIDC_ISSUER_URL=""
+ARG VITE_OIDC_CLIENT_ID=""
+ARG VITE_OIDC_REDIRECT_URI=""
+
+WORKDIR /build
+
+# Copy package files
+COPY cockpit/package.json cockpit/package-lock.json* ./
+
+# Install dependencies
+RUN npm install
+
+# Copy source code
+COPY cockpit/ ./
+
+# Set OIDC env vars for Vite build
+ENV VITE_OIDC_ISSUER_URL=$VITE_OIDC_ISSUER_URL
+ENV VITE_OIDC_CLIENT_ID=$VITE_OIDC_CLIENT_ID
+ENV VITE_OIDC_REDIRECT_URI=$VITE_OIDC_REDIRECT_URI
+
+# Build the application
+RUN npm run build
+
+# ── Stage 3: Production nginx ────────────────────────────────────────────────
+FROM nginx:alpine
+
+# Copy built assets from builder
+COPY --from=builder /build/dist /usr/share/nginx/html
+
+# Copy nginx configuration
+COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copy installer scripts so they can be served via /install and /install.ps1
+COPY scripts/install-satellite.sh /usr/share/nginx/scripts/install-satellite.sh
+COPY scripts/install-satellite.ps1 /usr/share/nginx/scripts/install-satellite.ps1
+
+# Copy cross-compiled satellite binaries from go-builder stage
+COPY --from=go-builder /releases/ /usr/share/nginx/releases/
+
+# Expose port
+EXPOSE 80
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["wget", "--spider", "-q", "http://localhost:80/health"] || exit 1
+
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]

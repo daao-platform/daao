@@ -1,0 +1,37 @@
+# Dockerfile.satellite — Lightweight satellite container for HA stress testing
+# Reuses the existing multi-platform build from the main Dockerfile
+
+FROM golang:1.25-alpine AS builder
+
+RUN apk add --no-cache git
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+COPY pkg/ ./pkg/
+COPY proto/ ./proto/
+COPY db/ ./db/
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /daao-satellite ./cmd/daao
+
+FROM alpine:3.21
+
+# Core deps + runtime
+# nodejs/npm: native Alpine musl build (glibc Node.js from nodejs.org is incompatible)
+RUN apk add --no-cache ca-certificates bash curl tar xz nodejs npm
+
+COPY --from=builder /daao-satellite /usr/local/bin/daao
+
+# DAAO extension pack — agent tooling, NOT a runtime (~47KB)
+COPY extensions/ /opt/daao/extensions/
+
+# Pre-create runtime + context directories for on-demand bootstrap
+RUN mkdir -p /opt/daao/runtime /etc/daao/context
+
+# The satellite needs keys and a registration to connect
+# These are generated at first launch via the entrypoint script
+COPY deploy/satellite-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+

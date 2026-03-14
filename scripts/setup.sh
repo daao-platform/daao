@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+# ============================================================================
+# setup.sh — Interactive first-time setup for DAAO
+# ============================================================================
+#
+# Generates secrets, TLS certificates, and .env — everything needed to
+# run `docker-compose up` for the first time.
+#
+# Usage:
+#   bash scripts/setup.sh
+#
+# ============================================================================
+
+set -euo pipefail
+
+# ---------- Colors & helpers ------------------------------------------------
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+info()  { echo -e "  ${CYAN}→${NC} $*"; }
+ok()    { echo -e "  ${GREEN}✓${NC} $*"; }
+warn()  { echo -e "  ${YELLOW}!${NC} $*"; }
+fail()  { echo -e "  ${RED}✗${NC} $*"; exit 1; }
+step()  { echo -e "\n${BOLD}  [$1/$TOTAL_STEPS] $2${NC}"; }
+
+# ---------- Detect repo root ------------------------------------------------
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+TOTAL_STEPS=4
+
+echo ""
+echo -e "${BOLD}  🔧  DAAO Setup${NC}"
+echo -e "${DIM}  ─────────────────────────────────────────${NC}"
+
+# ---------- Pre-flight checks -----------------------------------------------
+
+command -v openssl >/dev/null 2>&1 || fail "openssl is required but not found"
+
+if [[ -f ".env" ]]; then
+    echo ""
+    warn ".env already exists."
+    read -r -p "  Overwrite? [y/N] " OVERWRITE
+    if [[ "$OVERWRITE" != "y" && "$OVERWRITE" != "Y" ]]; then
+        info "Setup cancelled. Your existing .env was not modified."
+        exit 0
+    fi
+fi
+
+# ---------- Step 1: Generate secrets ----------------------------------------
+
+step 1 "Generating secrets"
+
+generate_secret() {
+    openssl rand -base64 32 | tr -d '=/+' | head -c 44
+}
+
+JWT_SECRET=$(generate_secret)
+POSTGRES_PASSWORD=$(generate_secret)
+
+ok "JWT_SECRET generated"
+ok "POSTGRES_PASSWORD generated"
+
+# ---------- Step 2: Generate TLS certificates --------------------------------
+
+step 2 "Generating TLS certificates"
+
+CERT_DIR="$REPO_ROOT/certs"
+mkdir -p "$CERT_DIR"
+
+# Only generate if certs don't already exist
+if [[ -f "$CERT_DIR/ca.crt" && -f "$CERT_DIR/server.crt" && -f "$CERT_DIR/key.pem" ]]; then
+    ok "Certificates already exist in certs/ — skipping"
+else
+    # Write SAN config (heredocs need stdin, so do this before stdin redirect)
+    cat > "$CERT_DIR/server.cnf" <<'CERTEOF'
+[req]
+default_bits = 2048
+prompt = no
+distinguished_name = dn
+req_extensions = v3_req
+
+[dn]
+CN = localhost
+
+[v3_req]
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
+DNS.2 = nexus
+DNS.3 = *.daao.local
+IP.1 = 127.0.0.1
+CERTEOF
+
+    # Disconnect stdin so openssl doesn't consume piped input (Git Bash quirk).
+    # Save original stdin to fd 3, then redirect stdin from /dev/null.
+    exec 3<&0
+    exec 0</dev/null
+    export MSYS_NO_PATHCONV=1  # Prevent Git Bash /CN= path mangling
+
+    openssl genrsa -out "$CERT_DIR/ca.key" 2048 2>/dev/null
+    openssl req -new -x509 -key "$CERT_DIR/ca.key" \
+        -out "$CERT_DIR/ca.crt" \
+        -days 3650 \
+        -subj "/CN=DAAO Local CA" 2>/dev/null
+    openssl genrsa -out "$CERT_DIR/key.pem" 2048 2>/dev/null
+    openssl req -new -key "$CERT_DIR/key.pem" \
+        -out "$CERT_DIR/server.csr" \
+        -config "$CERT_DIR/server.cnf" 2>/dev/null
+    openssl x509 -req -in "$CERT_DIR/server.csr" \
+        -CA "$CERT_DIR/ca.crt" -CAkey "$CERT_DIR/ca.key" \
+        -CAcreateserial \
+        -out "$CERT_DIR/server.crt" \
+        -days 365 \
+        -extensions v3_req \
+        -extfile "$CERT_DIR/server.cnf" 2>/dev/null
+
+    # Restore stdin
+    exec 0<&3
+    exec 3<&-
+    unset MSYS_NO_PATHCONV
+
+    # Verify certs were created
+    [[ -f "$CERT_DIR/server.crt" ]] || fail "Failed to generate TLS certificates"
+
+    # Clean up intermediate files
+    rm -f "$CERT_DIR/server.csr" "$CERT_DIR/server.cnf" "$CERT_DIR/ca.srl"
+
+    ok "CA certificate created (valid 10 years)"
+    ok "Server certificate created (valid 1 year)"
+    ok "SAN: localhost, nexus, *.daao.local, 127.0.0.1"
+fi
+
+# ---------- Step 3: Owner account -------------------------------------------
+
+step 3 "Owner account ${DIM}(optional)${NC}"
+
+echo -e "  ${DIM}The owner is the first admin user. You can also create${NC}"
+echo -e "  ${DIM}users later via the API. Press Enter to skip.${NC}"
+echo ""
+
+DAAO_OWNER_EMAIL=""
+read -r -p "  Email for admin user: " DAAO_OWNER_EMAIL
+
+if [[ -n "$DAAO_OWNER_EMAIL" ]]; then
+    ok "Owner email set: $DAAO_OWNER_EMAIL"
+    info "A random password will be printed to the Nexus log on first boot"
+else
+    info "Skipped — no owner account will be created"
+fi
+
+# ---------- Step 4: Write .env -----------------------------------------------
+
+step 4 "Writing .env"
+
+cat > "$REPO_ROOT/.env" <<EOF
+# DAAO Environment — generated by scripts/setup.sh
+# $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+
+# Security
+JWT_SECRET=$JWT_SECRET
+
+# Database
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+
+# Owner account
+DAAO_OWNER_EMAIL=${DAAO_OWNER_EMAIL}
+
+# Cockpit port
+COCKPIT_PORT=8081
+EOF
+
+ok ".env created"
+
+# ---------- Done -------------------------------------------------------------
+
+echo ""
+echo -e "${DIM}  ─────────────────────────────────────────${NC}"
+echo -e "${BOLD}  ✅  Setup complete!${NC}"
+echo ""
+echo -e "  ${BOLD}To start DAAO:${NC}"
+echo -e "    ${CYAN}docker-compose up --build${NC}"
+echo ""
+echo -e "  ${BOLD}Then open:${NC}"
+echo -e "    ${CYAN}http://localhost:8081${NC}  — Cockpit dashboard"
+echo ""
+if [[ -n "$DAAO_OWNER_EMAIL" ]]; then
+    echo -e "  ${DIM}Your admin password will appear in the Nexus container log.${NC}"
+    echo ""
+fi

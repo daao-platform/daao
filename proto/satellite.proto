@@ -1,0 +1,280 @@
+syntax = "proto3";
+
+package nexus;
+
+option go_package = "github.com/daao/nexus/proto";
+
+// SatelliteMessage is sent from Satellite to Nexus
+message SatelliteMessage {
+  oneof payload {
+    RegisterRequest register_request = 1;
+    TerminalData terminal_data = 2;
+    SessionStateUpdate session_state_update = 3;
+    IpcEvent ipc_event = 4;
+    HeartbeatPing heartbeat_ping = 5;
+    TelemetryReport telemetry_report = 6;
+    BufferReplay buffer_replay = 7;
+    ProposalRequest proposal_request = 8;
+    AgentEvent agent_event = 9;
+    ContextFileUpdate context_file_update = 10;
+    ProvisionProgress provision_progress = 11;
+  }
+}
+
+// BufferReplay carries a full ring buffer snapshot from a satellite
+// session, sent on reconnect so Nexus can rehydrate its in-memory pool.
+message BufferReplay {
+  string session_id = 1;
+  bytes data = 2;         // Raw terminal output (Snapshot bytes)
+}
+
+// NexusMessage is sent from Nexus to Satellite
+message NexusMessage {
+  oneof payload {
+    TerminalInput terminal_input = 1;
+    ResizeCommand resize_command = 2;
+    SuspendCommand suspend_command = 3;
+    ResumeCommand resume_command = 4;
+    KillCommand kill_command = 5;
+    StartSessionCommand start_session_command = 6;
+    UpdateAvailable update_available = 7;
+    ProposalDecision proposal_decision = 8;
+    DeployAgentCommand deploy_agent_command = 9;
+    ContextFilePush context_file_push = 10;
+    SessionReconciliation session_reconciliation = 11;
+    ProvisionRuntimeCommand provision_runtime_command = 12;
+  }
+}
+
+// SessionReconciliation is sent from Nexus to Satellite after registration.
+// Contains the authoritative list of active sessions for this satellite so
+// the satellite can prune any orphan sessions that Nexus no longer knows about.
+message SessionReconciliation {
+  repeated string active_session_ids = 1;
+}
+
+// StartSessionCommand creates and starts a new session process on the satellite
+message StartSessionCommand {
+  string session_id = 1;
+  string agent_binary = 2;
+  repeated string agent_args = 3;
+  int32 cols = 4;
+  int32 rows = 5;
+  string working_dir = 6;
+}
+
+// RegisterRequest is sent when a satellite connects
+message RegisterRequest {
+  string satellite_id = 1;
+  string fingerprint = 2;
+  string public_key = 3;
+  int64 timestamp = 4;
+  string version = 5;  // Satellite binary version (e.g. "v1.2.3")
+  string os = 6;       // runtime.GOOS (e.g. "windows", "linux", "darwin")
+  string arch = 7;     // runtime.GOARCH (e.g. "amd64", "arm64")
+  repeated string available_agents = 8; // Agent binaries found on this satellite
+}
+
+// TerminalData carries terminal output from a session
+message TerminalData {
+  string session_id = 1;
+  bytes data = 2;
+  int64 sequence_number = 3;
+  int64 timestamp = 4;
+  bool is_stdout = 5;
+}
+
+// SessionStateUpdate carries session state changes
+message SessionStateUpdate {
+  string session_id = 1;
+  SessionState state = 2;
+  int64 timestamp = 3;
+  string error_message = 4;
+}
+
+enum SessionState {
+  SESSION_STATE_UNSPECIFIED = 0;
+  SESSION_STATE_STARTING = 1;
+  SESSION_STATE_RUNNING = 2;
+  SESSION_STATE_SUSPENDED = 3;
+  SESSION_STATE_TERMINATED = 4;
+  SESSION_STATE_ERROR = 5;
+  SESSION_STATE_DETACHED = 6;
+  SESSION_STATE_RE_ATTACHING = 7;
+}
+
+// IpcEvent carries IPC events between processes
+message IpcEvent {
+  string session_id = 1;
+  string event_type = 2;
+  bytes payload = 3;
+  int64 timestamp = 4;
+}
+
+// HeartbeatPing keeps the stream alive and detects connectivity
+message HeartbeatPing {
+  int64 timestamp = 1;
+  int64 sequence_number = 2;
+}
+
+// TerminalInput sends terminal input to a session
+message TerminalInput {
+  string session_id = 1;
+  bytes data = 2;
+  int64 sequence_number = 3;
+}
+
+// ResizeCommand resizes a terminal session
+message ResizeCommand {
+  string session_id = 1;
+  int32 width = 2;
+  int32 height = 3;
+  int32 pixel_width = 4;
+  int32 pixel_height = 5;
+}
+
+// SuspendCommand suspends a running session
+message SuspendCommand {
+  string session_id = 1;
+}
+
+// ResumeCommand resumes a suspended session
+message ResumeCommand {
+  string session_id = 1;
+}
+
+// KillCommand terminates a session
+message KillCommand {
+  string session_id = 1;
+  int32 exit_code = 2;
+}
+
+// SatelliteGateway service for bidirectional streaming between Satellite and Nexus
+service SatelliteGateway {
+  // Connect establishes a bidirectional stream for session communication
+  rpc Connect(stream SatelliteMessage) returns (stream NexusMessage);
+}
+
+// UpdateAvailable is sent from Nexus to a satellite when a newer version exists
+message UpdateAvailable {
+  string latest_version = 1;   // The newest version available on the server
+  string download_url = 2;     // Full URL to download the binary
+  bool force = 3;              // If true, satellite should auto-update immediately
+}
+
+// RiskLevel indicates the severity of a proposed command
+enum RiskLevel {
+  RISK_LEVEL_UNSPECIFIED = 0;
+  RISK_LEVEL_LOW = 1;         // Read-only commands, status checks
+  RISK_LEVEL_MEDIUM = 2;      // Service restarts, config changes
+  RISK_LEVEL_HIGH = 3;        // Data modifications, package installs
+  RISK_LEVEL_CRITICAL = 4;    // Destructive operations, system changes
+}
+
+// ProposalRequest is sent from Satellite to Nexus when an AI agent
+// calls daao.proposeAction to request human approval for a command.
+message ProposalRequest {
+  string session_id = 1;       // Session the AI agent is running in
+  string proposal_id = 2;      // Unique proposal ID (generated by satellite)
+  string command = 3;           // The command the AI wants to execute
+  string justification = 4;    // AI's explanation of why this command is needed
+  RiskLevel risk_level = 5;    // Severity assessment
+  int64 timestamp = 6;
+  string satellite_id = 7;     // Satellite where the command would execute
+}
+
+// ProposalDecision is sent from Nexus to Satellite after a human
+// approves or denies a proposal in the Cockpit.
+message ProposalDecision {
+  string session_id = 1;
+  string proposal_id = 2;
+  bool approved = 3;           // true = approved, false = denied
+  string reason = 4;           // Optional reason from the human reviewer
+  string approver_id = 5;      // UUID of the user who made the decision
+  int64 timestamp = 6;
+}
+
+// TelemetryReport carries system metrics from a satellite
+message TelemetryReport {
+  string satellite_id = 1;
+  double cpu_percent = 2;          // 0-100 overall CPU utilisation
+  double memory_percent = 3;       // 0-100 memory utilisation
+  int64 memory_used_bytes = 4;
+  int64 memory_total_bytes = 5;
+  double disk_percent = 6;         // 0-100 root/primary disk utilisation
+  int64 disk_used_bytes = 7;
+  int64 disk_total_bytes = 8;
+  repeated GpuMetrics gpus = 9;
+  int64 timestamp = 10;
+  int32 active_sessions = 11;
+  repeated string available_agents = 12; // Agent binaries currently available
+}
+
+// GpuMetrics carries per-GPU metrics
+message GpuMetrics {
+  int32 index = 1;
+  string name = 2;
+  double utilization_percent = 3;   // 0-100 GPU core utilisation
+  int64 memory_used_bytes = 4;
+  int64 memory_total_bytes = 5;
+  double temperature_celsius = 6;
+}
+
+// AgentDefinitionProto defines an agent that can be deployed to a satellite
+message AgentDefinitionProto {
+  string name = 1;           // Agent name (e.g., "code-agent", "task-executor")
+  string version = 2;        // Agent version (e.g., "v1.0.0")
+  string image = 3;          // Container image or binary path
+  map<string, string> config = 4;  // Agent configuration key-value pairs
+  repeated string capabilities = 5;  // Agent capabilities
+  string entrypoint = 6;    // Entry point command or script
+}
+
+// DeployAgentCommand is sent from Nexus to Satellite to deploy an agent
+message DeployAgentCommand {
+  string session_id = 1;    // Session to deploy the agent into
+  AgentDefinitionProto agent_definition = 2;  // The agent to deploy
+  map<string, string> secrets = 3;  // Secrets for the agent (API keys, tokens, etc.)
+}
+
+// AgentEvent is sent from Satellite to Nexus to report agent events
+message AgentEvent {
+  string session_id = 1;     // Session where the event occurred
+  string event_type = 2;     // Event type (e.g., "started", "stopped", "error", "output")
+  bytes payload = 3;         // Event-specific data
+  int64 timestamp = 4;       // Unix timestamp in milliseconds
+}
+
+// ContextFileSync carries file synchronization data for agent context
+message ContextFileSync {
+  string satellite_id = 1;   // Source satellite ID
+  string file_path = 2;      // Path to the file
+  bytes content = 3;         // File content
+  int64 version = 4;         // File version number
+  string modified_by = 5;   // Who modified the file (agent name, user, etc.)
+}
+
+// ContextFilePush is sent from Nexus to Satellite to push file updates
+message ContextFilePush {
+  ContextFileSync file = 1;  // The file to sync
+}
+
+// ContextFileUpdate is sent from Satellite to Nexus to report file changes
+message ContextFileUpdate {
+  ContextFileSync file = 1;  // The updated file
+}
+
+// ProvisionRuntimeCommand triggers runtime bootstrap on a satellite.
+// Sent from Nexus to Satellite (e.g., when admin clicks "Provision" in Cockpit).
+message ProvisionRuntimeCommand {
+  bool force = 1;  // If true, re-install even if runtime already exists
+}
+
+// ProvisionProgress reports bootstrap progress from Satellite to Nexus.
+// Streamed during bootstrap so Cockpit can show real-time provisioning status.
+message ProvisionProgress {
+  string step = 1;       // Step identifier: "download_node", "install_pi", "complete", "error"
+  string message = 2;    // Human-readable status message
+  bool complete = 3;     // True when provisioning is finished (success or failure)
+  string error = 4;      // Non-empty when the step failed
+}

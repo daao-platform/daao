@@ -1,0 +1,58 @@
+# Build stage
+FROM golang:1.26-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git
+
+WORKDIR /build
+
+# Copy go mod files first for better caching
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy all Go source code
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+COPY pkg/ ./pkg/
+COPY proto/ ./proto/
+COPY db/ ./db/
+
+# licenses signed by the DAAO licensor. Pass via:
+
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -o nexus ./cmd/nexus
+
+# Production stage
+FROM alpine:3.21
+
+# Install utilities for healthcheck
+RUN apk add --no-cache ca-certificates wget
+
+WORKDIR /
+
+# Copy the binary from builder
+COPY --from=builder /build/nexus .
+
+# Copy database migrations
+COPY --from=builder /build/db /db
+
+
+# Create non-root user
+RUN adduser -D -g '' nonroot
+
+# Entrypoint wrapper: set UDP buffer sizes for QUIC, then drop to nonroot
+RUN printf '#!/bin/sh\n\
+    # Increase UDP buffer sizes for QUIC/WebTransport (best-effort)\n\
+    sysctl -w net.core.rmem_max=7340032 2>/dev/null || true\n\
+    sysctl -w net.core.wmem_max=7340032 2>/dev/null || true\n\
+    exec su-exec nonroot /nexus "$@"\n' > /entrypoint.sh && chmod +x /entrypoint.sh
+
+# Install su-exec for privilege drop
+RUN apk add --no-cache su-exec
+
+EXPOSE 8443 8444
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=5 \
+    CMD wget --no-check-certificate --spider -q https://localhost:8443/health || exit 1
+
+ENTRYPOINT ["/entrypoint.sh"]
